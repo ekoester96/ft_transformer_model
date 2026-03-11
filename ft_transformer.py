@@ -21,7 +21,7 @@ from sklearn.metrics import (
     precision_recall_curve,
 )
 from sklearn.preprocessing import LabelEncoder
-
+from sklearn.preprocessing import StandardScaler
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -481,10 +481,13 @@ def train_fold(hp, cat_encoder, cat_cols, cont_cols,
     """Train one model, return best val probabilities and metrics."""
 
     cat_train = cat_encoder.transform(X_train, cat_cols)
-    cont_train = X_train[cont_cols].fillna(0).values.astype(np.float32)
+    cont_train_raw = X_train[cont_cols].fillna(0).values.astype(np.float32)
+    scaler = StandardScaler()
+    cont_train = scaler.fit_transform(cont_train_raw).astype(np.float32)
 
     cat_val = cat_encoder.transform(X_val, cat_cols)
-    cont_val = X_val[cont_cols].fillna(0).values.astype(np.float32)
+    cont_val_raw = X_val[cont_cols].fillna(0).values.astype(np.float32)
+    cont_val = scaler.transform(cont_val_raw).astype(np.float32)
 
     train_ds = ShipmentDataset(cat_train, cont_train, y_train)
     val_ds = ShipmentDataset(cat_val, cont_val, y_val)
