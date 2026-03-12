@@ -1,12 +1,4 @@
-To ensure this README perfectly fits your needs, I have a few clarifying questions before we finalize it:
 
-1. **Cluster Execution:** Since this runs on an NVIDIA GPU cluster, do you need a section detailing the specific job submission commands (e.g., Slurm `sbatch` commands) used to run the script?
-2. **Business Context:** The model predicts `has_slack` based on shipment times. Would you like to add a specific summary of *why* the University of Arkansas is researching this (e.g., supply chain optimization, cost reduction)?
-3. **Licensing/Citation:** Will this research be published? If so, do you want to include a citation section for the FT-Transformer architecture or an open-source license?
-
-In the meantime, based on the code and configuration files you provided, here is a comprehensive draft for your `README.md` that you can use right away:
-
-```markdown
 # FT Transformer Model for Shipment Slack Prediction
 
 ## Overview
@@ -97,6 +89,4 @@ After a successful run, the script will generate a `holdout_results/` directory 
 * `.env.example`: Template for required environment variables.
 * `.gitignore`: Configured to ignore generated files, `.env` secrets, and `holdout_results/`.
 
-```
 
-```
