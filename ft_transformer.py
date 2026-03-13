@@ -401,6 +401,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     total_loss = 0
     n_batches = 0
+    
     for cat, cont, targets in loader:
         cat, cont, targets = cat.to(device), cont.to(device), targets.to(device)
         optimizer.zero_grad()
@@ -410,6 +411,12 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         optimizer.step()
         total_loss += loss.item()
         n_batches += 1
+
+        # --- NEW: Print progress every 100 batches ---
+        if n_batches % 100 == 0:
+            current_avg_loss = total_loss / n_batches
+            print(f"      Batch {n_batches}/{len(loader)} | Running Loss: {current_avg_loss:.4f}")
+
     return total_loss / n_batches
 
 
