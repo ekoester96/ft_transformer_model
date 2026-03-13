@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-
 from sklearn.metrics import (
     classification_report,
     confusion_matrix,
@@ -20,13 +19,14 @@ from sklearn.metrics import (
     roc_curve,
     precision_recall_curve,
 )
-from sklearn.preprocessing import LabelEncoder
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler, MinMaxScaler
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore")
+import functools
+print = functools.partial(print, flush=True)
 
 HOSTNAME = os.environ["TD_HOST"]
 USERNAME = os.environ["TD_USERNAME"]
@@ -75,14 +75,14 @@ class FTTransformerHyperparameters:
     # Transformer architecture
     n_layers: int = 3
     n_heads: int = 8
-    attn_dropout: float = 0.2
-    ffn_dropout: float = 0.3
+    attn_dropout: float = 0.1
+    ffn_dropout: float = 0.2
     ffn_multiplier: float = 4 / 3  # FFN hidden dim = embedding_dim * multiplier
 
     # Training
     learning_rate: float = 1e-4
     weight_decay: float = 1e-5
-    batch_size: int = 512
+    batch_size: int = 2048
     epochs: int = 50
     early_stopping_patience: int = 7
 
@@ -90,12 +90,12 @@ class FTTransformerHyperparameters:
     # Formula: min(max_embed_dim, base_factor * cardinality ** exponent)
     embed_base_factor: float = 1.6
     embed_exponent: float = 0.56
-    embed_max_dim: int = 128
+    embed_max_dim: int = 64
     embed_min_dim: int = 8
 
     # Global token dimension (continuous features projected to this)
     # Set to 0 to auto-calculate as median of categorical embedding dims
-    token_dim: int = 0
+    token_dim: int = 192
 
     # Misc
     random_state: int = 42
@@ -481,13 +481,25 @@ def train_fold(hp, cat_encoder, cat_cols, cont_cols,
     """Train one model, return best val probabilities and metrics."""
 
     cat_train = cat_encoder.transform(X_train, cat_cols)
-    cont_train_raw = X_train[cont_cols].fillna(0).values.astype(np.float32)
-    scaler = StandardScaler()
-    cont_train = scaler.fit_transform(cont_train_raw).astype(np.float32)
-
     cat_val = cat_encoder.transform(X_val, cat_cols)
-    cont_val_raw = X_val[cont_cols].fillna(0).values.astype(np.float32)
-    cont_val = scaler.transform(cont_val_raw).astype(np.float32)
+    cont_train = X_train[cont_cols].fillna(0).values.astype(np.float32)
+    cont_val = X_val[cont_cols].fillna(0).values.astype(np.float32)
+
+    # Scale continuous features (fit on train only)
+    lead_col = "load_create_lead_days"
+    lead_idx = cont_cols.index(lead_col) if lead_col in cont_cols else None
+    other_idxs = [i for i in range(len(cont_cols)) if i != lead_idx]
+
+    # StandardScaler for all continuous features except load_create_lead_days
+    std_scaler = StandardScaler()
+    cont_train[:, other_idxs] = std_scaler.fit_transform(cont_train[:, other_idxs])
+    cont_val[:, other_idxs] = std_scaler.transform(cont_val[:, other_idxs])
+
+    # MinMaxScaler for load_create_lead_days
+    if lead_idx is not None:
+        mm_scaler = MinMaxScaler()
+        cont_train[:, lead_idx:lead_idx+1] = mm_scaler.fit_transform(cont_train[:, lead_idx:lead_idx+1])
+        cont_val[:, lead_idx:lead_idx+1] = mm_scaler.transform(cont_val[:, lead_idx:lead_idx+1])
 
     train_ds = ShipmentDataset(cat_train, cont_train, y_train)
     val_ds = ShipmentDataset(cat_val, cont_val, y_val)
@@ -509,19 +521,22 @@ def train_fold(hp, cat_encoder, cat_cols, cont_cols,
     best_proba = None
     patience_counter = 0
     best_state = None
-
+    fold_start = time.time()
+    
     for epoch in range(1, hp.epochs + 1):
+        epoch_start = time.time()
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_proba, val_targets = evaluate(model, val_loader, criterion, device)
         scheduler.step(val_loss)
 
         roc = roc_auc_score(val_targets, val_proba)
         lr_now = optimizer.param_groups[0]["lr"]
-
-        if epoch % 5 == 0 or epoch == 1:
-            print(f"  {fold_label}Epoch {epoch:3d} | "
-                  f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} "
-                  f"ROC={roc:.4f} lr={lr_now:.1e}")
+        epoch_time = time.time() - epoch_start
+        
+        print(f"  {fold_label}Epoch {epoch:3d}/{hp.epochs} | "
+              f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} "
+              f"ROC={roc:.4f} lr={lr_now:.1e} | "
+              f"epoch {epoch_time:.1f}s", flush=True)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -534,7 +549,10 @@ def train_fold(hp, cat_encoder, cat_cols, cont_cols,
             if patience_counter >= hp.early_stopping_patience:
                 print(f"  {fold_label}Early stopping at epoch {epoch}")
                 break
-
+            
+    total_time = time.time() - fold_start
+    print(f"  {fold_label}Training complete — {epoch} epochs in {total_time:.1f}s "
+          f"({total_time/epoch:.1f}s/epoch avg)", flush=True)
     return best_proba, val_targets, best_val_loss, best_state, model
 
 
